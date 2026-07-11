@@ -214,6 +214,51 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
     )
 
 
+def update_cve(cfg: Config) -> str:
+    """最新 baseline zip から、カタログの max(date_updated) より新しいレコードを追記する。
+
+    差分抽出は日時比較のみなので、何日停止しても次の1回で完全回復する。
+    baseline zip のダウンロード (~550MB) は登録済みチェックの後に行う。
+    """
+    storage = make_storage(cfg)
+    baseline_date, url = cvelist.latest_baseline()
+    key = cvelist.key_for_update(baseline_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {baseline_date}"
+            max_updated = lake.max_cve_date_updated()
+            if max_updated is None:
+                return "refused: cve_history is empty; run backfill cve first"
+            zip_path = workdir / "baseline.zip"
+            cvelist.download(url, zip_path)
+            zf = cvelist.open_baseline(zip_path, workdir / "unzip")
+            rows, bad = [], 0
+            try:
+                for _, names in cvelist.iter_names_by_year(zf):
+                    for name in names:
+                        row = cvelist.parse_record(zf.read(name))
+                        if row is None:
+                            bad += 1
+                        elif row["date_updated"] > max_updated:
+                            rows.append(row)
+            finally:
+                zf.close()
+            if not rows:
+                return f"no-new-records {baseline_date}"
+            parquet = workdir / "updates.parquet"
+            cvelist.write_parquet(cvelist.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"cve updates {baseline_date} ({len(rows)} records)")
+            lake.add_file("cve_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {baseline_date} ({len(rows)} records, {bad} bad)"
+
+
 def backfill_cve(cfg: Config, source_zip: Path | None = None) -> str:
     """baseline zip (省略時は最新リリースをダウンロード) から全 CVE を取り込む。
 
