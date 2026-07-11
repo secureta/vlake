@@ -44,9 +44,7 @@ class LocalStorage:
         if not self.root.exists():
             return []
         keys = (
-            str(p.relative_to(self.root))
-            for p in self.root.rglob("*")
-            if p.is_file()
+            str(p.relative_to(self.root)) for p in self.root.rglob("*") if p.is_file()
         )
         return sorted(k for k in keys if k.startswith(prefix))
 

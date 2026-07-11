@@ -108,7 +108,11 @@ def _sort_merge(day_dir: Path, out: Path, workdir: Path) -> None:
 
 
 def _ingest_year(
-    storage: Storage, lake: Lake, year: int, days: list[tuple[date, Path]], workdir: Path
+    storage: Storage,
+    lake: Lake,
+    year: int,
+    days: list[tuple[date, Path]],
+    workdir: Path,
 ) -> None:
     """確定年の全日次 CSV を年1ファイルに集約して登録する。"""
     day_dir = workdir / f"days-{year}"
@@ -179,7 +183,9 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
                         skipped_years += 1
                         continue
                     if _daily_registered(registered, year):
-                        print(f"  {year}: 日次ファイルが登録済みのため skip (年集約は行わない)")
+                        print(
+                            f"  {year}: 日次ファイルが登録済みのため skip (年集約は行わない)"
+                        )
                         skipped_years += 1
                         continue
                     _ingest_year(storage, lake, year, days, workdir)
@@ -188,7 +194,11 @@ def backfill_epss(cfg: Config, source_dir: Path, today: date | None = None) -> s
                 else:
                     for d, path in days:
                         ok, _ = _ingest_day(
-                            storage, lake, path.read_bytes(), fallback=d, workdir=workdir
+                            storage,
+                            lake,
+                            path.read_bytes(),
+                            fallback=d,
+                            workdir=workdir,
                         )
                         added_days += ok
                         skipped_days += not ok

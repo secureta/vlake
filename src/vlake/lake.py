@@ -27,7 +27,9 @@ class Lake:
         self.con.execute("INSTALL ducklake; LOAD ducklake;")
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
         options = f" (DATA_PATH '{_q(data_path)}')" if data_path else ""
-        self.con.execute(f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}")
+        self.con.execute(
+            f"ATTACH 'ducklake:{_q(str(catalog_path))}' AS {self.ALIAS}{options}"
+        )
 
     def ensure_epss_table(self) -> None:
         self.con.execute(
@@ -63,9 +65,17 @@ class Lake:
             pass  # 拡張のバージョンによっては未対応。注記は必須機能ではない
 
     def refresh_datasets_view(self, infos: list[dict]) -> None:
-        cols = ("name", "source_url", "license_name", "license_text", "attribution", "disclaimer")
+        cols = (
+            "name",
+            "source_url",
+            "license_name",
+            "license_text",
+            "attribution",
+            "disclaimer",
+        )
         values = ", ".join(
-            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")" for info in infos
+            "(" + ", ".join(f"'{_q(str(info[c]))}'" for c in cols) + ")"
+            for info in infos
         )
         self.con.execute(
             f"CREATE OR REPLACE VIEW {self.ALIAS}.datasets AS "
