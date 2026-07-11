@@ -9,9 +9,15 @@ CVE® is a registered trademark of The MITRE Corporation.
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
+import zipfile
+from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -167,3 +173,61 @@ def key_for_update(d: date) -> str:
 
 def write_parquet(table: pa.Table, path: Path) -> None:
     pq.write_table(table, path, compression="zstd")
+
+
+RELEASES_LATEST_URL = "https://api.github.com/repos/CVEProject/cvelistV5/releases/latest"
+_BASELINE_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})_all_CVEs_at_midnight\.zip\.zip$")
+_RECORD_NAME = re.compile(r"CVE-(\d{4})-\d{4,}\.json$")
+
+
+def latest_baseline() -> tuple[date, str]:
+    """最新リリースの baseline zip の (日付, ダウンロード URL) を返す。"""
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"  # API レート制限の回避 (任意)
+    resp = httpx.get(RELEASES_LATEST_URL, headers=headers,
+                     follow_redirects=True, timeout=60)
+    resp.raise_for_status()
+    for asset in resp.json().get("assets", []):
+        m = _BASELINE_NAME.match(asset.get("name", ""))
+        if m:
+            return date.fromisoformat(m.group(1)), asset["browser_download_url"]
+    raise RuntimeError("最新リリースに baseline zip が見つからない")
+
+
+def download(url: str, dest: Path) -> None:
+    """baseline zip (~550MB) をストリーミングでダウンロードする。"""
+    with httpx.stream("GET", url, follow_redirects=True, timeout=600) as resp:
+        resp.raise_for_status()
+        with dest.open("wb") as f:
+            for chunk in resp.iter_bytes():
+                f.write(chunk)
+
+
+def open_baseline(zip_path: Path, workdir: Path) -> zipfile.ZipFile:
+    """baseline zip を開く。実配布形式 (cves.zip を1つ内包) は workdir に展開して開く。"""
+    workdir.mkdir(parents=True, exist_ok=True)
+    zf = zipfile.ZipFile(zip_path)
+    names = zf.namelist()
+    if len(names) == 1 and names[0].endswith(".zip"):
+        inner = workdir / "cves.zip"
+        with zf.open(names[0]) as src, inner.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        zf.close()
+        return zipfile.ZipFile(inner)
+    return zf
+
+
+def iter_names_by_year(zf: zipfile.ZipFile) -> Iterator[tuple[int, list[str]]]:
+    """CVE レコードのエントリ名を CVE-ID の年でグループ化して年昇順に返す。
+
+    zip 内のディレクトリ構造には依存しない (ファイル名の CVE ID だけを見る)。
+    """
+    by_year: dict[int, list[str]] = {}
+    for name in zf.namelist():
+        m = _RECORD_NAME.search(name)
+        if m:
+            by_year.setdefault(int(m.group(1)), []).append(name)
+    for year in sorted(by_year):
+        yield year, sorted(by_year[year])
