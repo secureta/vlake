@@ -19,6 +19,7 @@ from .storage import Storage, make_storage
 CATALOG_KEY = "vlake.ducklake"
 _BACKFILL_NAME = re.compile(r"epss_scores-(\d{4}-\d{2}-\d{2})\.csv\.gz$")
 _KEY_DATE = re.compile(r"epss-(\d{4}-\d{2}-\d{2})\.parquet$")
+_KEY_YEAR = re.compile(r"epss-(\d{4})\.parquet$")
 
 
 def _dates_from_keys(keys: list[str]) -> list[date]:
@@ -29,6 +30,20 @@ def _dates_from_keys(keys: list[str]) -> list[date]:
         if m:
             dates.append(date.fromisoformat(m.group(1)))
     return dates
+
+
+def _years_from_keys(keys: list[str]) -> set[int]:
+    """ストレージキーから対象年を抽出する (日次ファイル・年ファイル両対応)。"""
+    years = set()
+    for key in keys:
+        m = _KEY_DATE.search(key)
+        if m:
+            years.add(date.fromisoformat(m.group(1)).year)
+            continue
+        m = _KEY_YEAR.search(key)
+        if m:
+            years.add(int(m.group(1)))
+    return years
 
 
 def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
@@ -136,8 +151,9 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
 
     件数一致だけでは「同数だが中身が違う」差し替えを見逃すため、
     登録パスの集合 (Lake.registered_paths()) をストレージの実キー集合と突き合わせ、
-    さらにファイル名由来の日付 (epss-YYYY-MM-DD.parquet) の min/max をカタログの
-    min(date)/max(date) と突き合わせる。row_count/min_date/max_date 自体は
+    さらにファイル名由来の日付を検証する。min は年ファイル (epss-YYYY.parquet) が
+    日付を持たないため年単位の比較に緩和し、max は進行中の年が常に日次であることを
+    利用して日次キーの max と厳密比較する。row_count/min_date/max_date 自体は
     count(*)/min/max のファイル統計 (メタデータ) で解決されるため、
     リモートでも全 Parquet の読み込みは発生しない。
 
@@ -149,6 +165,7 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
     keys = [k for k in storage.list("epss/") if k.endswith(".parquet")]
     storage_paths = {storage.url(k) for k in keys}
     key_dates = _dates_from_keys(keys)
+    key_years = _years_from_keys(keys)
     with tempfile.TemporaryDirectory() as td:
         catalog = Path(td) / CATALOG_KEY
         if not storage.get(CATALOG_KEY, catalog):
@@ -172,7 +189,9 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
             lake.close()
     ok = storage_paths == catalog_paths
     if key_dates:
-        ok = ok and min_date == min(key_dates) and max_date == max(key_dates)
+        ok = ok and max_date == max(key_dates)
+    if key_years:
+        ok = ok and min_date is not None and min_date.year == min(key_years)
     stale = (
         max_age_days is not None
         and max_date is not None

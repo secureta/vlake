@@ -154,3 +154,12 @@ def test_rebuild_catalog(cfg, monkeypatch):
 def test_rebuild_catalog_refuses_when_empty(cfg):
     assert pipeline.rebuild_catalog(cfg) == "refused: no parquet files in storage"
     assert not (cfg.local_dir / "vlake.ducklake").exists()
+
+
+def test_years_from_keys():
+    keys = [
+        "epss/year=2021/epss-2021.parquet",
+        "epss/year=2026/epss-2026-07-10.parquet",
+        "epss/other.txt",
+    ]
+    assert pipeline._years_from_keys(keys) == {2021, 2026}
