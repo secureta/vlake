@@ -70,7 +70,10 @@ years into per-year Parquet files, and ingests the current year day by day
 (roughly an hour). It is idempotent — already-registered years/days are
 skipped — so re-running after a failure is safe. It shares the `publish`
 concurrency group with the daily job, so the two never touch the catalog
-concurrently.
+concurrently. Note: if a backfill run dies partway, the daily `publish`
+workflow's `verify` step will stay red (storage holds files the catalog does
+not reference yet) until you re-dispatch **backfill** — that re-run completes
+the recovery; the published catalog is never left in a broken state.
 
 Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variables.
 
