@@ -1,6 +1,8 @@
 name: backfill
 on:
   workflow_dispatch:
+permissions:
+  contents: read  # checkout のみ。GITHUB_TOKEN の権限を最小化
 concurrency:
   group: publish  # publish.yml と同一グループ: 日次 update とのカタログ差し替え競合を直列化
   cancel-in-progress: false
