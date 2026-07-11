@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from vlake.config import Config
 from vlake.storage import LocalStorage, make_storage
 
