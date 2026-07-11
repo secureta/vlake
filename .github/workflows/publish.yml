@@ -9,6 +9,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    environment: publish  # Secrets/Variables はこの Environment に置く (ブランチ保護付き)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

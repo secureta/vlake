@@ -52,16 +52,23 @@ Local mode for testing: set `VLAKE_LOCAL_DIR=/some/dir` instead of the S3 variab
 
 The included GitHub Actions workflow (`.github/workflows/publish.yml`) runs
 `vlake update epss` daily at 14:30 UTC (EPSS publishes around 13:30 UTC).
-Fork the repo, configure the repository settings below (Settings → Secrets and
-variables → Actions), and you have your own lake.
+Fork the repo and create a **`publish` Environment** (Settings → Environments →
+New environment → name it `publish`) — the workflow's `environment: publish` line
+only resolves Secrets/Variables stored there. Configure inside that Environment:
 
-| Name | Where | Why |
+| Name | Where (in the `publish` Environment) | Why |
 |---|---|---|
-| `VLAKE_PUBLIC_URL` | **Variable** | Public by definition (it is the URL consumers use) |
-| `VLAKE_S3_ENDPOINT` | **Secret** | May contain your account ID (e.g. R2 endpoint) |
-| `VLAKE_S3_BUCKET` | **Secret** | Keeps the write-target bucket name private |
-| `AWS_ACCESS_KEY_ID` | **Secret** | Credential |
-| `AWS_SECRET_ACCESS_KEY` | **Secret** | Credential |
+| `VLAKE_PUBLIC_URL` | **Environment variable** | Public by definition (it is the URL consumers use) |
+| `VLAKE_S3_ENDPOINT` | **Environment secret** | May contain your account ID (e.g. R2 endpoint) |
+| `VLAKE_S3_BUCKET` | **Environment secret** | Keeps the write-target bucket name private |
+| `AWS_ACCESS_KEY_ID` | **Environment secret** | Credential |
+| `AWS_SECRET_ACCESS_KEY` | **Environment secret** | Credential |
+
+Keeping them in an Environment (rather than repository-level) means they are only
+exposed to jobs that declare `environment: publish`, and you can add protection
+rules: restrict **deployment branches** to `main` (recommended — a workflow edited
+on any other branch then cannot reach the credentials) and optionally require
+reviewers before each run.
 
 Notes:
 - Scheduled workflows are disabled by default on forks — after forking, open the
