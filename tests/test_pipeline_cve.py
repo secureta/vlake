@@ -97,3 +97,69 @@ def test_backfill_cve_downloads_when_no_source(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(cvelist, "download", fake_download)
     msg = pipeline.backfill_cve(cfg)
     assert msg == "backfilled 1 year files (skipped 0 years, 0 bad records)"
+
+
+def _patch_fetch(monkeypatch, tmp_path, records, baseline_date):
+    zp = tmp_path / f"baseline-{baseline_date}.zip"
+    make_baseline_zip(zp, records)
+    monkeypatch.setattr(
+        cvelist, "latest_baseline", lambda: (baseline_date, "https://x/baseline")
+    )
+    monkeypatch.setattr(
+        cvelist, "download", lambda url, dest: dest.write_bytes(zp.read_bytes())
+    )
+
+
+def test_update_cve_appends_only_newer_records(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(zp, _records())  # max date_updated = 2026-07-01
+    pipeline.backfill_cve(cfg, source_zip=zp)
+
+    updated = [
+        make_cve_record("CVE-2021-44228", date_updated="2026-07-10T03:00:00Z",
+                        description="Updated description."),
+        make_cve_record("CVE-2021-0001", date_updated="2024-01-01T00:00:00Z"),
+        make_cve_record("CVE-2024-1234", date_updated="2026-07-01T00:00:00Z"),
+    ]
+    _patch_fetch(monkeypatch, tmp_path, updated, date(2026, 7, 11))
+
+    msg = pipeline.update_cve(cfg)
+    assert msg == "published 2026-07-11 (1 records, 0 bad)"
+    assert (cfg.local_dir / "cve" / "updates" / "year=2026"
+            / "cve-updates-2026-07-11.parquet").exists()
+
+    # 同日 baseline の再実行は skip
+    assert pipeline.update_cve(cfg) == "already-registered 2026-07-11"
+
+    con = _attach(cfg)
+    assert con.execute("SELECT count(*) FROM frozen.cve_history").fetchone()[0] == 4
+    # view は最新版を返す
+    desc, updated_ts = con.execute(
+        "SELECT description, date_updated FROM frozen.cve WHERE cve = 'CVE-2021-44228'"
+    ).fetchone()
+    assert desc == "Updated description."
+    assert updated_ts == datetime(2026, 7, 10, 3, 0, 0)
+    assert con.execute("SELECT count(*) FROM frozen.cve").fetchone()[0] == 3
+
+
+def test_update_cve_no_new_records(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    zp = tmp_path / "initial.zip"
+    make_baseline_zip(zp, _records())
+    pipeline.backfill_cve(cfg, source_zip=zp)
+
+    _patch_fetch(monkeypatch, tmp_path, _records(), date(2026, 7, 12))
+    assert pipeline.update_cve(cfg) == "no-new-records 2026-07-12"
+    # 空ファイルは登録しない
+    assert not (cfg.local_dir / "cve" / "updates").exists()
+
+
+def test_update_cve_refuses_on_empty_table(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    _patch_fetch(monkeypatch, tmp_path, _records(), date(2026, 7, 11))
+    msg = pipeline.update_cve(cfg)
+    assert msg == "refused: cve_history is empty; run backfill cve first"
