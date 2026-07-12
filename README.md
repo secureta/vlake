@@ -5,8 +5,8 @@ Currently included: **EPSS** (full daily history since 2021-04-14), **CVE**
 (CVE List V5, full record history of changes), **GHSA** (GitHub Advisory
 Database, github-reviewed advisories with package/version ranges),
 **ExploitDB** (Exploit Database index, exploit metadata linked to code by URL),
-and **nuclei** (nuclei-templates index, detection template metadata linked to
-templates by URL).
+**nuclei** (nuclei-templates index, detection template metadata linked to
+templates by URL), and **KEV** (CISA Known Exploited Vulnerabilities catalog).
 
 ## Query it
 
@@ -27,6 +27,9 @@ FROM vlake.exploitdb WHERE list_contains(cve, 'CVE-2021-44228');
 SELECT template_id, name, severity, template_url
 FROM vlake.nuclei
 WHERE list_contains(cve, 'CVE-2024-3400') AND NOT removed;
+-- Is this CVE known to be exploited in the wild?
+SELECT cve, vulnerability_name, date_added, due_date, known_ransomware_campaign_use
+FROM vlake.kev WHERE cve = 'CVE-2021-44228' AND NOT removed;
 SELECT * FROM vlake.datasets;  -- data sources & licenses
 ```
 
@@ -124,6 +127,19 @@ release (a few per year). No backfill: the first `update cwe` loads the whole
 current catalog. `cwe/last-modified.txt` stores the upstream `Last-Modified`
 value used for conditional GETs.
 
+`kev_history(cve, vendor_project, product, vulnerability_name,
+short_description, required_action, known_ransomware_campaign_use, notes,
+cwe VARCHAR[], date_added DATE, due_date DATE, fetched_date DATE,
+removed BOOLEAN)` — append-only history of the CISA Known Exploited
+Vulnerabilities catalog. KEV records carry no modification timestamp
+(`date_added` never changes after listing), so changes are detected by
+comparing every field against the catalog's latest row. Records withdrawn by
+CISA get a tombstone row with `removed = true` carrying the last known
+values. The `kev` view returns the latest row per `cve`.
+
+Layout: `kev/updates/year=YYYY/kev-updates-YYYY-MM-DD.parquet` (daily deltas;
+the first run is the full load — there is no backfill for kev).
+
 ## Build your own lake
 
 ```bash
@@ -148,6 +164,7 @@ uv run vlake update ghsa
 uv run vlake update exploitdb
 uv run vlake update nuclei  # no backfill: the first run does a full load
 uv run vlake update cwe     # no backfill: snapshot per CWE release
+uv run vlake update kev     # no backfill: the first run does a full load
 uv run vlake verify
 ```
 
@@ -226,6 +243,14 @@ nuclei data is template metadata from
 [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates),
 © ProjectDiscovery, Inc., licensed under the MIT License
 (`licenses/MIT-nuclei-templates.txt`). Template bodies are not redistributed.
+See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
+
+KEV data is the CISA Known Exploited Vulnerabilities Catalog
+(https://www.cisa.gov/known-exploited-vulnerabilities-catalog), distributed
+under CC0 1.0 Universal (`licenses/CC0-1.0-kev.txt`). This project
+redistributes it with modifications (JSON converted to Parquet). Not endorsed
+by CISA or DHS; the CISA Logo and DHS Seal are not used. Third-party links in
+the data are bound by the policies and licenses of those third-party websites.
 See [DATA_LICENSES.md](DATA_LICENSES.md) and `SELECT * FROM vlake.datasets`.
 
 ## Code license
