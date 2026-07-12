@@ -628,6 +628,7 @@ def rebuild_catalog(cfg: Config) -> str:
         "ghsa/": "ghsa_history",
         "exploitdb/": "exploitdb_history",
         "nuclei/": "nuclei_history",
+        "cwe/": "cwe_history",
     }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
@@ -660,6 +661,9 @@ _EXPLOITDB_UPDATE_KEY_DATE = re.compile(
     r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
 _NUCLEI_UPDATE_KEY_DATE = re.compile(r"nuclei-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+# cwe のキーはバージョン断面 (cwe/version=<ver>/) で日付を含まないため常に不一致。
+# _verify_history の「max(ts) が日次キーに追随」検査は自然にスキップされる
+_CWE_UPDATE_KEY_DATE = re.compile(r"cwe-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -822,6 +826,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="nuclei_history",
                     ts_column="fetched_date",
                     update_key_re=_NUCLEI_UPDATE_KEY_DATE,
+                ),
+                "cwe": _verify_history(
+                    storage,
+                    lake,
+                    None,  # CWE は数ヶ月更新なしが正常のため鮮度チェック対象外
+                    prefix="cwe/",
+                    table="cwe_history",
+                    ts_column="release_date",
+                    update_key_re=_CWE_UPDATE_KEY_DATE,
                 ),
             }
         finally:
