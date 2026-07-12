@@ -247,3 +247,35 @@ def test_backfill_exploitdb_via_cli_without_source(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     assert "backfilled 1 year files" in result.output
     assert called["source"] is None
+
+
+def test_update_nuclei_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_nuclei",
+        lambda cfg: "published 2026-07-12 (12000 records, 3 bad)",
+    )
+    result = CliRunner().invoke(main, ["update", "nuclei"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-12" in result.output
+
+
+def test_update_nuclei_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "nuclei", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_backfill_nuclei_not_available(monkeypatch, tmp_path):
+    # nuclei に backfill は無い (初回 update が全量投入)
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "nuclei"])
+    assert result.exit_code != 0
+    assert "nuclei" in result.output  # Choice 外の invalid choice エラー
