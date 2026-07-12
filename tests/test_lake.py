@@ -276,6 +276,107 @@ def test_kev_latest_rows_and_view(tmp_path):
         lake.close()
 
 
+def test_cve_sources_view_summarizes_dataset_presence(tmp_path):
+    lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
+    try:
+        lake.ensure_tables()
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.epss "  # noqa: S608
+            "(cve, epss, percentile, date, model_version) VALUES "
+            "('CVE-2024-0001', 0.1, 0.2, DATE '2026-07-10', 'v1'), "
+            "('CVE-2024-0001', 0.2, 0.3, DATE '2026-07-11', 'v1'), "
+            "('CVE-2024-0002', 0.3, 0.4, DATE '2026-07-10', 'v1')"
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.cve_history "  # noqa: S608
+            "(cve, date_updated) VALUES "
+            "('CVE-2024-0001', TIMESTAMP '2026-07-10 00:00:00'), "
+            "('CVE-2024-0001', TIMESTAMP '2026-07-11 00:00:00')"
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.ghsa_history "  # noqa: S608
+            "(ghsa, cve, modified) VALUES "
+            "('GHSA-aaaa-bbbb-cccc', 'CVE-2024-0001', TIMESTAMP '2026-07-10 00:00:00'), "
+            "('GHSA-dddd-eeee-ffff', 'CVE-2024-0001', TIMESTAMP '2026-07-11 00:00:00'), "
+            "('GHSA-gggg-hhhh-iiii', NULL, TIMESTAMP '2026-07-11 00:00:00')"
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.exploitdb_history "  # noqa: S608
+            "(edb_id, cve, date_updated) VALUES "
+            "(10, ['CVE-2024-0001', 'CVE-2024-0003'], DATE '2026-07-10'), "
+            "(11, ['CVE-2024-0003'], DATE '2026-07-11')"
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.nuclei_history "  # noqa: S608
+            "(template_id, cve, fetched_date, removed) VALUES "
+            "('tpl-live', ['CVE-2024-0001'], DATE '2026-07-10', false), "
+            "('tpl-removed', ['CVE-2024-0004'], DATE '2026-07-10', true)"
+        )
+        lake.con.execute(
+            f"INSERT INTO {lake.ALIAS}.kev_history "  # noqa: S608
+            "(cve, fetched_date, removed) VALUES "
+            "('CVE-2024-0001', DATE '2026-07-10', false), "
+            "('CVE-2024-0005', DATE '2026-07-10', true)"
+        )
+
+        lake.refresh_cve_view()
+        lake.refresh_ghsa_view()
+        lake.refresh_exploitdb_view()
+        lake.refresh_nuclei_view()
+        lake.refresh_kev_view()
+        lake.refresh_cve_sources_view()
+        lake.refresh_cve_sources_view()  # 再実行しても壊れない
+
+        got = lake.query(
+            "SELECT cve, has_epss, has_cve, has_ghsa, has_exploitdb, "
+            "has_nuclei, has_kev, epss_days, ghsa_count, exploitdb_count, nuclei_count "
+            "FROM lake.cve_sources ORDER BY cve"
+        )
+        assert got == [
+            (
+                "CVE-2024-0001",
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                2,
+                2,
+                1,
+                1,
+            ),
+            (
+                "CVE-2024-0002",
+                True,
+                False,
+                False,
+                False,
+                False,
+                False,
+                1,
+                0,
+                0,
+                0,
+            ),
+            (
+                "CVE-2024-0003",
+                False,
+                False,
+                False,
+                True,
+                False,
+                False,
+                0,
+                0,
+                2,
+                0,
+            ),
+        ]
+    finally:
+        lake.close()
+
+
 def test_cwe_view_returns_latest_snapshot(tmp_path):
     lake = Lake(tmp_path / "cat.ducklake", data_path=str(tmp_path / "data"))
     try:
