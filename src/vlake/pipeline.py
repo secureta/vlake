@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss, ghsa
+from . import cvelist, epss, exploitdb, ghsa
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -66,10 +66,16 @@ def _open_lake(storage: Storage, workdir: Path) -> tuple[Lake, Path]:
 
 def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_datasets_view(
-        [epss.LICENSE_INFO, cvelist.LICENSE_INFO, ghsa.LICENSE_INFO]
+        [
+            epss.LICENSE_INFO,
+            cvelist.LICENSE_INFO,
+            ghsa.LICENSE_INFO,
+            exploitdb.LICENSE_INFO,
+        ]
     )
     lake.refresh_cve_view()
     lake.refresh_ghsa_view()
+    lake.refresh_exploitdb_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -396,10 +402,117 @@ def backfill_ghsa(cfg: Config, source_tar: Path | None = None) -> str:
     return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
 
 
+def update_exploitdb(cfg: Config, today: date | None = None) -> str:
+    """最新 CSV から、カタログの max(date_updated) より新しい索引行を追記する。
+
+    date_updated は日単位のため strict `>` では同じ最大日に後から現れた行を
+    取りこぼす。max 日以降を拾い、その日に既登録の (edb_id) を除外することで
+    取りこぼしと二重計上の両方を防ぐ。CSV に日付ラベルは無いため日次キーには
+    実行日 (UTC) を使う。today はテスト用の注入点 (省略時は実日付)。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = exploitdb.key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            max_updated = lake.max_exploitdb_date_updated()
+            if max_updated is None:
+                return (
+                    "refused: exploitdb_history is empty; run backfill exploitdb first"
+                )
+            same_day_ids = lake.exploitdb_edb_ids_at(max_updated)
+            csv_path = workdir / "files_exploits.csv"
+            exploitdb.download(exploitdb.CSV_URL, csv_path)
+            rows, bad = [], 0
+            for rawrow in exploitdb.iter_rows(csv_path.read_bytes()):
+                row = exploitdb.parse_row(rawrow)
+                if row is None:
+                    bad += 1
+                    continue
+                du = row["date_updated"]
+                if du is None:
+                    continue
+                if du > max_updated or (
+                    du == max_updated and row["edb_id"] not in same_day_ids
+                ):
+                    rows.append(row)
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            exploitdb.write_parquet(exploitdb.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"exploitdb updates {run_date} ({len(rows)} records)")
+            lake.add_file("exploitdb_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records, {bad} bad)"
+
+
+def backfill_exploitdb(cfg: Config, source_csv: Path | None = None) -> str:
+    """files_exploits.csv (省略時は最新をダウンロード) から全索引を取り込む。
+
+    date_published 年ごとに1ファイル (edb_id ソート)。登録済みの年は skip (冪等)。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        if source_csv is None:
+            source_csv = workdir / "files_exploits.csv"
+            print("  files_exploits.csv をダウンロード中...")
+            exploitdb.download(exploitdb.CSV_URL, source_csv)
+        raw = source_csv.read_bytes()
+        parsed, bad, min_year = [], 0, None
+        for rawrow in exploitdb.iter_rows(raw):
+            row = exploitdb.parse_row(rawrow)
+            if row is None:
+                bad += 1
+                continue
+            parsed.append(row)
+            y = exploitdb.year_of(row)
+            if y is not None and (min_year is None or y < min_year):
+                min_year = y
+        by_year: dict[int, list[dict]] = {}
+        for row in parsed:
+            year = exploitdb.year_of(row) or min_year or 1970
+            by_year.setdefault(year, []).append(row)
+        lake, catalog = _open_lake(storage, workdir)
+        added = skipped = 0
+        try:
+            registered = lake.registered_paths()
+            for year in sorted(by_year):
+                key = exploitdb.key_for_year(year)
+                if storage.url(key) in registered:
+                    skipped += 1
+                    continue
+                rows = by_year[year]
+                parquet = workdir / f"exploitdb-{year}.parquet"
+                exploitdb.write_parquet(exploitdb.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"exploitdb {year} backfill ({len(rows)} records)")
+                lake.add_file("exploitdb_history", storage.url(key))
+                parquet.unlink()
+                added += 1
+                print(f"  {year}: {len(rows)} 件")
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
+
+
 def rebuild_catalog(cfg: Config) -> str:
     """ストレージ上の Parquet 一覧を真実源としてカタログをゼロから作り直す。"""
     storage = make_storage(cfg)
-    tables = {"epss/": "epss", "cve/": "cve_history", "ghsa/": "ghsa_history"}
+    tables = {
+        "epss/": "epss",
+        "cve/": "cve_history",
+        "ghsa/": "ghsa_history",
+        "exploitdb/": "exploitdb_history",
+    }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
         (k, table)
@@ -427,6 +540,9 @@ def rebuild_catalog(cfg: Config) -> str:
 
 _UPDATE_KEY_DATE = re.compile(r"cve-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _GHSA_UPDATE_KEY_DATE = re.compile(r"ghsa-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
+_EXPLOITDB_UPDATE_KEY_DATE = re.compile(
+    r"exploitdb-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
+)
 
 
 def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict:
@@ -459,6 +575,11 @@ def _verify_epss(storage: Storage, lake: Lake, max_age_days: int | None) -> dict
         "ok": ok,
         "stale": stale,
     }
+
+
+def _as_date(value):
+    """TIMESTAMP は .date() を取り、DATE (datetime.date) はそのまま返す。"""
+    return value.date() if isinstance(value, datetime) else value
 
 
 def _verify_history(
@@ -504,19 +625,19 @@ def _verify_history(
         ok = (
             ok
             and max_ts is not None
-            and max_ts.date() >= max(update_dates) - timedelta(days=1)
+            and _as_date(max_ts) >= max(update_dates) - timedelta(days=1)
         )
     stale = (
         max_age_days is not None
         and max_ts is not None
-        and (date.today() - max_ts.date()).days > max_age_days
+        and (date.today() - _as_date(max_ts)).days > max_age_days
     )
     return {
         "files_in_storage": len(keys),
         "files_in_catalog": len(catalog_paths),
         "row_count": row_count,
-        "min_date": min_ts.date() if min_ts else None,
-        "max_date": max_ts.date() if max_ts else None,
+        "min_date": _as_date(min_ts) if min_ts else None,
+        "max_date": _as_date(max_ts) if max_ts else None,
         "ok": ok,
         "stale": stale,
     }
@@ -566,6 +687,15 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="ghsa_history",
                     ts_column="modified",
                     update_key_re=_GHSA_UPDATE_KEY_DATE,
+                ),
+                "exploitdb": _verify_history(
+                    storage,
+                    lake,
+                    max_age_days,
+                    prefix="exploitdb/",
+                    table="exploitdb_history",
+                    ts_column="date_updated",
+                    update_key_re=_EXPLOITDB_UPDATE_KEY_DATE,
                 ),
             }
         finally:
