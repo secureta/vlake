@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cvelist, epss, exploitdb, ghsa, nuclei
+from . import cvelist, cwe, epss, exploitdb, ghsa, nuclei
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -72,12 +72,14 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
             ghsa.LICENSE_INFO,
             exploitdb.LICENSE_INFO,
             nuclei.LICENSE_INFO,
+            cwe.LICENSE_INFO,
         ]
     )
     lake.refresh_cve_view()
     lake.refresh_ghsa_view()
     lake.refresh_exploitdb_view()
     lake.refresh_nuclei_view()
+    lake.refresh_cwe_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -571,6 +573,50 @@ def update_nuclei(cfg: Config, today: date | None = None) -> str:
         finally:
             lake.close()
     return f"published {run_date} ({len(rows)} records, {bad} bad)"
+
+
+def update_cwe(cfg: Config) -> str:
+    """cwec XML の新バージョン断面を全件スナップショットとして追記する。
+
+    CWE は年数回しか更新されないため、前回成功時の Last-Modified による
+    条件付き GET (304 なら即終了、レイクも開かない) で日次実行の無駄な
+    ダウンロードを避ける。Last-Modified の保存はカタログ公開成功後のみ
+    行い、途中失敗時は次回が無条件 GET からやり直す (冪等回復)。
+    カタログが空なら初回 update が全量投入となるため backfill は存在しない。
+    削除はカタログ側の Status=Deprecated で表現されるためトゥームストーンも
+    不要。
+    """
+    storage = make_storage(cfg)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lm_path = workdir / "last-modified.txt"
+        prev_lm = None
+        if storage.get(cwe.LAST_MODIFIED_KEY, lm_path):
+            prev_lm = lm_path.read_text().strip() or None
+        fetched = cwe.fetch(prev_lm)
+        if fetched is None:
+            return "not-modified"
+        raw_zip, last_modified = fetched
+        version, _, rows = cwe.parse_catalog(raw_zip)
+        key = cwe.key_for_version(version)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                result = f"already-registered {version}"
+            else:
+                parquet = workdir / "snapshot.parquet"
+                cwe.write_parquet(cwe.rows_to_table(rows), parquet)
+                storage.put(parquet, key)
+                lake.set_message(f"cwe {version} ({len(rows)} records)")
+                lake.add_file("cwe_history", storage.url(key))
+                _publish_catalog(storage, lake, catalog)
+                result = f"published {version} ({len(rows)} records)"
+        finally:
+            lake.close()
+        if last_modified:
+            lm_path.write_text(last_modified + "\n")
+            storage.put(lm_path, cwe.LAST_MODIFIED_KEY)
+    return result
 
 
 def rebuild_catalog(cfg: Config) -> str:
