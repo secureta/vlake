@@ -127,3 +127,51 @@ def test_update_cwe_failure_does_not_save_last_modified(cfg, monkeypatch):
         pipeline.update_cwe(cfg)
     assert not (cfg.local_dir / "cwe" / "last-modified.txt").exists()
     assert not (cfg.local_dir / "vlake.ducklake").exists()  # カタログ未公開
+
+
+def test_verify_covers_cwe_and_excludes_from_staleness(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)  # release_date 2026-04-30
+    pipeline.update_cwe(cfg)
+
+    # release_date が数ヶ月前でも CWE は鮮度チェックの対象外 (更新が無いのが正常)
+    report = pipeline.verify(cfg, max_age_days=3)
+    assert report["ok"] is True
+    assert report["stale"] is False
+    rep = report["datasets"]["cwe"]
+    assert rep["files_in_storage"] == rep["files_in_catalog"] == 1
+    assert rep["row_count"] == 5
+    assert rep["max_date"] == date(2026, 4, 30)
+    assert rep["stale"] is False
+
+
+def test_verify_detects_cwe_stray_file(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+
+    stray = cfg.local_dir / "cwe" / "version=9.99" / "cwe-9.99.parquet"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not parquet")
+
+    report = pipeline.verify(cfg)
+    assert report["ok"] is False
+    assert report["datasets"]["cwe"]["ok"] is False
+
+
+def test_verify_ignores_last_modified_marker(cfg, monkeypatch):
+    # cwe/last-modified.txt は Parquet ではないので整合検査の対象にならない
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+    assert (cfg.local_dir / "cwe" / "last-modified.txt").exists()
+    assert pipeline.verify(cfg)["ok"] is True
+
+
+def test_rebuild_catalog_covers_cwe(cfg, monkeypatch):
+    _patch_fetch(monkeypatch, make_cwe_xml_zip(), LM1)
+    pipeline.update_cwe(cfg)
+
+    (cfg.local_dir / "vlake.ducklake").unlink()
+    assert pipeline.rebuild_catalog(cfg) == "rebuilt catalog with 1 files"
+
+    con = _attach(cfg)
+    assert con.execute("SELECT count(*) FROM frozen.cwe_history").fetchone()[0] == 5
+    assert con.execute("SELECT count(*) FROM frozen.cwe").fetchone()[0] == 5
