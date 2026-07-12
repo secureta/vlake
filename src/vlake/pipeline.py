@@ -402,6 +402,57 @@ def backfill_ghsa(cfg: Config, source_tar: Path | None = None) -> str:
     return f"backfilled {added} year files (skipped {skipped} years, {bad} bad records)"
 
 
+def update_exploitdb(cfg: Config, today: date | None = None) -> str:
+    """最新 CSV から、カタログの max(date_updated) より新しい索引行を追記する。
+
+    date_updated は日単位のため strict `>` では同じ最大日に後から現れた行を
+    取りこぼす。max 日以降を拾い、その日に既登録の (edb_id) を除外することで
+    取りこぼしと二重計上の両方を防ぐ。CSV に日付ラベルは無いため日次キーには
+    実行日 (UTC) を使う。today はテスト用の注入点 (省略時は実日付)。
+    """
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = exploitdb.key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            max_updated = lake.max_exploitdb_date_updated()
+            if max_updated is None:
+                return (
+                    "refused: exploitdb_history is empty; run backfill exploitdb first"
+                )
+            same_day_ids = lake.exploitdb_edb_ids_at(max_updated)
+            csv_path = workdir / "files_exploits.csv"
+            exploitdb.download(exploitdb.CSV_URL, csv_path)
+            rows, bad = [], 0
+            for rawrow in exploitdb.iter_rows(csv_path.read_bytes()):
+                row = exploitdb.parse_row(rawrow)
+                if row is None:
+                    bad += 1
+                    continue
+                du = row["date_updated"]
+                if du is None:
+                    continue
+                if du > max_updated or (
+                    du == max_updated and row["edb_id"] not in same_day_ids
+                ):
+                    rows.append(row)
+            if not rows:
+                return f"no-new-records {run_date}"
+            parquet = workdir / "updates.parquet"
+            exploitdb.write_parquet(exploitdb.rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"exploitdb updates {run_date} ({len(rows)} records)")
+            lake.add_file("exploitdb_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records, {bad} bad)"
+
+
 def backfill_exploitdb(cfg: Config, source_csv: Path | None = None) -> str:
     """files_exploits.csv (省略時は最新をダウンロード) から全索引を取り込む。
 
