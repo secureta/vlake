@@ -291,6 +291,78 @@ class Lake:
             f"(PARTITION BY cve ORDER BY fetched_date DESC) = 1"
         )
 
+    def refresh_cve_sources_view(self) -> None:
+        """CVE ごとに関連データが存在する公開 view/table を要約する view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.cve_sources AS
+            WITH
+            epss_src AS (
+                SELECT cve, count(*) AS epss_days
+                FROM {self.ALIAS}.epss
+                GROUP BY cve
+            ),
+            cve_src AS (
+                SELECT cve
+                FROM {self.ALIAS}.cve
+            ),
+            ghsa_src AS (
+                SELECT cve, count(*) AS ghsa_count
+                FROM {self.ALIAS}.ghsa
+                WHERE cve IS NOT NULL
+                GROUP BY cve
+            ),
+            exploitdb_src AS (
+                SELECT x.cve, count(*) AS exploitdb_count
+                FROM {self.ALIAS}.exploitdb, UNNEST(cve) AS x(cve)
+                WHERE x.cve IS NOT NULL
+                GROUP BY x.cve
+            ),
+            nuclei_src AS (
+                SELECT x.cve, count(*) AS nuclei_count
+                FROM {self.ALIAS}.nuclei, UNNEST(cve) AS x(cve)
+                WHERE x.cve IS NOT NULL AND NOT removed
+                GROUP BY x.cve
+            ),
+            kev_src AS (
+                SELECT cve
+                FROM {self.ALIAS}.kev
+                WHERE NOT removed
+            ),
+            all_cves AS (
+                SELECT cve FROM epss_src
+                UNION
+                SELECT cve FROM cve_src
+                UNION
+                SELECT cve FROM ghsa_src
+                UNION
+                SELECT cve FROM exploitdb_src
+                UNION
+                SELECT cve FROM nuclei_src
+                UNION
+                SELECT cve FROM kev_src
+            )
+            SELECT
+                all_cves.cve,
+                epss_src.cve IS NOT NULL AS has_epss,
+                cve_src.cve IS NOT NULL AS has_cve,
+                ghsa_src.cve IS NOT NULL AS has_ghsa,
+                exploitdb_src.cve IS NOT NULL AS has_exploitdb,
+                nuclei_src.cve IS NOT NULL AS has_nuclei,
+                kev_src.cve IS NOT NULL AS has_kev,
+                COALESCE(epss_src.epss_days, 0) AS epss_days,
+                COALESCE(ghsa_src.ghsa_count, 0) AS ghsa_count,
+                COALESCE(exploitdb_src.exploitdb_count, 0) AS exploitdb_count,
+                COALESCE(nuclei_src.nuclei_count, 0) AS nuclei_count
+            FROM all_cves
+            LEFT JOIN epss_src ON all_cves.cve = epss_src.cve
+            LEFT JOIN cve_src ON all_cves.cve = cve_src.cve
+            LEFT JOIN ghsa_src ON all_cves.cve = ghsa_src.cve
+            LEFT JOIN exploitdb_src ON all_cves.cve = exploitdb_src.cve
+            LEFT JOIN nuclei_src ON all_cves.cve = nuclei_src.cve
+            LEFT JOIN kev_src ON all_cves.cve = kev_src.cve"""  # noqa: S608
+        )
+
     def refresh_cwe_view(self) -> None:
         """release_date 最大のバージョン断面 (全エントリ) を返す view。
 
