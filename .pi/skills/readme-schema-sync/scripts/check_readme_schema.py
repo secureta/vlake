@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""README の Schema 節が lake.py のテーブル定義と同期しているか検証する。"""
+"""スキーマ参照ドキュメントが lake.py のテーブル定義と同期しているか検証する。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-README = ROOT / "README.md"
+SCHEMA_DOC = ROOT / "docs" / "schema.md"
 LAKE = ROOT / "src" / "vlake" / "lake.py"
 
 TABLE_RE = re.compile(r"CREATE TABLE IF NOT EXISTS \{self\.ALIAS\}\.(\w+) \(")
@@ -46,7 +46,7 @@ CVE_SOURCES_COLUMNS = [
 
 
 def normalize_struct_fields(fields: str) -> str:
-    """STRUCT(...) 内をREADMEの簡略表記に合わせてフィールド名だけに正規化する。"""
+    """STRUCT(...) 内をドキュメントの簡略表記に合わせてフィールド名だけに正規化する。"""
     names = re.findall(
         r"\b([a-z_][a-z0-9_]*)\s+(?:VARCHAR|DOUBLE|DATE|TIMESTAMP|INTEGER|BOOLEAN|STRUCT\b)",
         fields,
@@ -59,7 +59,7 @@ def normalize_struct_fields(fields: str) -> str:
 
 
 def normalize_type(type_text: str) -> str:
-    """README と SQL 定義の型表記を比較用に正規化する。"""
+    """ドキュメントと SQL 定義の型表記を比較用に正規化する。"""
     text = type_text.strip().rstrip(",")
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s*,\s*", ", ", text)
@@ -123,15 +123,11 @@ def parse_lake_tables() -> dict[str, list[tuple[str, str]]]:
     return tables
 
 
-def parse_readme_tables() -> dict[str, list[tuple[str, str]]]:
-    """README Schema 節のカラム表からカラム名・型を取り出す。"""
-    text = README.read_text()
-    try:
-        schema = text.split("## Schema", 1)[1].split("## Build your own lake", 1)[0]
-    except IndexError as exc:
-        raise SystemExit(
-            "README.md に ## Schema / ## Build your own lake 節が見つかりません"
-        ) from exc
+def parse_schema_doc_tables() -> dict[str, list[tuple[str, str]]]:
+    """docs/schema.md のカラム表からカラム名・型を取り出す。"""
+    if not SCHEMA_DOC.exists():
+        raise SystemExit("docs/schema.md が見つかりません")
+    schema = SCHEMA_DOC.read_text()
 
     tables: dict[str, list[tuple[str, str]]] = {}
     current: str | None = None
@@ -172,23 +168,23 @@ def main() -> int:
     }
     expected["datasets"] = DATASETS_COLUMNS
     expected["cve_sources"] = CVE_SOURCES_COLUMNS
-    actual = parse_readme_tables()
+    actual = parse_schema_doc_tables()
 
     ok = True
     for section, columns in expected.items():
         if section not in actual:
-            print(f"MISSING README section/table: {section}", file=sys.stderr)
+            print(f"MISSING schema doc section/table: {section}", file=sys.stderr)
             ok = False
             continue
         if actual[section] != columns:
-            print(f"SCHEMA MISMATCH: {section}", file=sys.stderr)
+            print(f"SCHEMA DOC MISMATCH: {section}", file=sys.stderr)
             print(f"  expected: {columns}", file=sys.stderr)
             print(f"  actual:   {actual[section]}", file=sys.stderr)
             ok = False
 
     extra = sorted(set(actual) - set(expected))
     if extra:
-        print(f"EXTRA README schema tables: {', '.join(extra)}", file=sys.stderr)
+        print(f"EXTRA schema doc tables: {', '.join(extra)}", file=sys.stderr)
         ok = False
 
     if ok:

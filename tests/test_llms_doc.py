@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LLMS_DOC = ROOT / "docs" / "llms.md"
 README = ROOT / "README.md"
+SCHEMA_DOC = ROOT / "docs" / "schema.md"
 PUBLISH_DOCS_WORKFLOW = ROOT / ".github" / "workflows" / "publish-docs.yml"
 
 
@@ -29,6 +30,39 @@ def test_readme_links_to_public_llms_txt() -> None:
 
     assert "## For LLMs" in text
     assert "https://vlake.reta.work/llms.txt" in text
+
+
+def test_schema_reference_lives_in_docs_schema() -> None:
+    readme = README.read_text()
+    schema = SCHEMA_DOC.read_text()
+
+    assert "[full schema reference](docs/schema.md)" in readme
+    assert "| Column | Type | Description |" not in readme
+    assert "# vulnlake schema reference" in schema
+    assert "| Column | Type | Description |" in schema
+    assert "### `epss`" in schema
+    assert "### `datasets`" in schema
+
+
+def test_llms_doc_links_to_schema_reference_file() -> None:
+    text = LLMS_DOC.read_text()
+
+    assert "https://github.com/secureta/vlake/blob/main/docs/schema.md" in text
+    assert "https://github.com/secureta/vlake#schema" not in text
+
+
+def test_schema_doc_relative_links_resolve() -> None:
+    # docs/schema.md は docs/ 配下にあるため、ルートの DATA_LICENSES.md への
+    # 相対リンクは ../ を付けないと解決しない (README から移設した際の破損防止)。
+    import re
+
+    schema = SCHEMA_DOC.read_text()
+    for match in re.finditer(r"\]\((?!https?://|#)([^)]+)\)", schema):
+        target = match.group(1).split("#", 1)[0]
+        if not target:
+            continue
+        resolved = (SCHEMA_DOC.parent / target).resolve()
+        assert resolved.exists(), f"broken relative link in docs/schema.md: {target}"
 
 
 def test_docs_workflow_publishes_llms_txt_with_markdown_headers() -> None:

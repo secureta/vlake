@@ -177,5 +177,5 @@ GROUP BY c.cve, c.title, c.cvss, c.cvss_severity, e.epss, e.percentile, k.date_a
   only and links to the original code with `code_url`.
 - nuclei template bodies are not redistributed. vulnlake includes template
   metadata only and links to the original template with `template_url`.
-- For the human-oriented project overview and schema reference, see
-  `https://github.com/secureta/vlake#schema`.
+- For the human-oriented project overview, see the README. For the full schema
+  reference, see `https://github.com/secureta/vlake/blob/main/docs/schema.md`.
