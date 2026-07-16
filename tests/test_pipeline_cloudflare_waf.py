@@ -42,18 +42,18 @@ def _patch_download(monkeypatch, files: dict[str, str]):
 
 def _initial_files():
     return {
-        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release - 2026-03-12 - Emergency"
 date: 2026-03-12
 ---
 This release adds detections for CVE-2026-1281 and CVE-2026-1340.
-''',
-        "src/content/changelog/waf/2026-04-01-waf-release.mdx": '''---
+""",
+        "src/content/changelog/waf/2026-04-01-waf-release.mdx": """---
 title: "WAF Release - 2026-04-01"
 date: 2026-04-01
 ---
 This release mentions GHSA-abcd-1234-wxyz.
-''',
+""",
     }
 
 
@@ -116,18 +116,18 @@ def test_update_cloudflare_waf_diff_tombstone_and_revival(cfg, monkeypatch):
     pipeline.update_cloudflare_waf(cfg, today=date(2026, 7, 16))
 
     changed = {
-        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+        "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release - 2026-03-12 - Emergency Updated"
 date: 2026-03-12
 ---
 Updated context for CVE-2026-1281 only.
-''',
-        "src/content/changelog/waf/2026-05-01-waf-release.mdx": '''---
+""",
+        "src/content/changelog/waf/2026-05-01-waf-release.mdx": """---
 title: "WAF Release - 2026-05-01"
 date: 2026-05-01
 ---
 New detection for CVE-2026-9999.
-''',
+""",
     }
     _patch_download(monkeypatch, changed)
 
@@ -136,8 +136,7 @@ New detection for CVE-2026-9999.
 
     con = _attach(cfg)
     removed = con.execute(
-        "SELECT removed FROM frozen.cloudflare_waf "
-        "WHERE identifier = 'CVE-2026-1340'"
+        "SELECT removed FROM frozen.cloudflare_waf WHERE identifier = 'CVE-2026-1340'"
     ).fetchone()[0]
     assert removed is True
     assert (
@@ -177,12 +176,12 @@ def test_update_cloudflare_waf_refuses_shrunken_snapshot(cfg, monkeypatch):
     _patch_download(
         monkeypatch,
         {
-            "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": '''---
+            "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx": """---
 title: "WAF Release"
 date: 2026-03-12
 ---
 Only CVE-2026-1281 remains.
-'''
+"""
         },
     )
     with pytest.raises(RuntimeError, match="less than half"):

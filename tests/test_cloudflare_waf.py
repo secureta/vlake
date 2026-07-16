@@ -23,7 +23,7 @@ def test_extract_identifiers_supports_multiple_vulnerability_id_types():
 
 
 def test_parse_current_changelog_mdx_extracts_frontmatter_and_context():
-    raw = b'''---
+    raw = b"""---
 title: "WAF Release - 2026-03-12 - Emergency"
 description: Cloudflare WAF managed rulesets emergency release
 date: 2026-03-12
@@ -34,7 +34,7 @@ import { RuleID } from "~/components";
 This release adds detections for Ivanti EPMM (CVE-2026-1281 and CVE-2026-1340).
 
 <td>Ivanti EPMM - Code Injection - CVE:CVE-2026-1281 CVE:CVE-2026-1340</td>
-'''
+"""
 
     rows = cloudflare_waf.parse_markdown(
         "src/content/changelog/waf/2026-03-12-emergency-waf-release.mdx", raw
@@ -48,14 +48,13 @@ This release adds detections for Ivanti EPMM (CVE-2026-1281 and CVE-2026-1340).
     assert rows[0]["source_title"] == "WAF Release - 2026-03-12 - Emergency"
     assert rows[0]["source_date"] == date(2026, 3, 12)
     assert rows[0]["source_url"] == (
-        "https://developers.cloudflare.com/changelog/"
-        "2026-03-12-emergency-waf-release/"
+        "https://developers.cloudflare.com/changelog/2026-03-12-emergency-waf-release/"
     )
     assert "CVE-2026-1281" in rows[0]["matched_text"]
 
 
 def test_parse_historical_table_uses_row_description_and_change_date():
-    raw = b'''---
+    raw = b"""---
 title: "Historical (2024)"
 ---
 <table><tbody>
@@ -69,7 +68,7 @@ title: "Historical (2024)"
 <td>Block</td>
 </tr>
 </tbody></table>
-'''
+"""
 
     rows = cloudflare_waf.parse_markdown(
         "src/content/docs/waf/change-log/historical-2024.mdx", raw
@@ -89,15 +88,22 @@ title: "Historical (2024)"
 
 
 def test_parse_dir_deduplicates_identifier_per_source_url(tmp_path):
-    p = tmp_path / "src" / "content" / "changelog" / "waf" / "2026-01-01-waf-release.mdx"
+    p = (
+        tmp_path
+        / "src"
+        / "content"
+        / "changelog"
+        / "waf"
+        / "2026-01-01-waf-release.mdx"
+    )
     p.parent.mkdir(parents=True)
     p.write_text(
-        '''---
+        """---
 title: WAF Release
 date: 2026-01-01
 ---
 CVE-2026-0001 appears twice: CVE:CVE-2026-0001.
-'''
+"""
     )
 
     rows = cloudflare_waf.parse_dir(tmp_path)
@@ -149,8 +155,7 @@ def test_rows_to_table_key_and_parquet_roundtrip(tmp_path):
         "GHSA-ABCD-1234-WXYZ",
     ]
     assert cloudflare_waf.key_for_update(date(2026, 7, 16)) == (
-        "cloudflare_waf/updates/year=2026/"
-        "cloudflare-waf-updates-2026-07-16.parquet"
+        "cloudflare_waf/updates/year=2026/cloudflare-waf-updates-2026-07-16.parquet"
     )
 
     out = tmp_path / "rows.parquet"

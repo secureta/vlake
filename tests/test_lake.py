@@ -299,12 +299,21 @@ def test_cloudflare_waf_latest_rows_and_view(tmp_path):
             (r["identifier"], r["source_url"]): r
             for r in lake.cloudflare_waf_latest_rows()
         }
-        assert rows[("CVE-2026-0001", "https://developers.cloudflare.com/changelog/a/")][
-            "source_title"
-        ] == "new"
-        assert rows[
-            ("GHSA-ABCD-1234-WXYZ", "https://developers.cloudflare.com/changelog/b/")
-        ]["removed"] is True
+        assert (
+            rows[("CVE-2026-0001", "https://developers.cloudflare.com/changelog/a/")][
+                "source_title"
+            ]
+            == "new"
+        )
+        assert (
+            rows[
+                (
+                    "GHSA-ABCD-1234-WXYZ",
+                    "https://developers.cloudflare.com/changelog/b/",
+                )
+            ]["removed"]
+            is True
+        )
 
         lake.refresh_cloudflare_waf_view()
         got = lake.query(
