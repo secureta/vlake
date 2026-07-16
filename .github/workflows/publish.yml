@@ -53,6 +53,12 @@ jobs:
       - id: cloudflare_waf
         continue-on-error: true
         run: uv run vlake update cloudflare_waf
+      - id: attack
+        continue-on-error: true
+        run: uv run vlake update attack
+      - id: capec
+        continue-on-error: true
+        run: uv run vlake update capec
       - run: uv run vlake verify --max-age-days 3
       - name: check update failures
         if: contains(steps.*.outcome, 'failure')

@@ -26,6 +26,8 @@ def main() -> None:
             "cwe",
             "kev",
             "cloudflare_waf",
+            "attack",
+            "capec",
         ]
     ),
 )
@@ -37,7 +39,7 @@ def main() -> None:
     help="取得する日付 (epss のみ。省略時は最新)",
 )
 def update(dataset: str, target) -> None:
-    """日次更新 (冪等)。nuclei / cwe / kev / cloudflare_waf は backfill 不要 (初回 update が全量投入)。"""
+    """日次更新 (冪等)。nuclei / cwe / kev / cloudflare_waf / attack / capec は初回 update が全量投入。"""
     cfg = Config.from_env()
     if dataset == "epss":
         click.echo(pipeline.update_epss(cfg, target.date() if target else None))
@@ -54,6 +56,8 @@ def update(dataset: str, target) -> None:
         "cwe": pipeline.update_cwe,
         "kev": pipeline.update_kev,
         "cloudflare_waf": pipeline.update_cloudflare_waf,
+        "attack": pipeline.update_attack,
+        "capec": pipeline.update_capec,
     }
     result = updaters[dataset](cfg)
     click.echo(result)

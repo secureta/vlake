@@ -21,17 +21,20 @@ DESCRIBE vlake.<table>;
 ## Querying rules
 
 - Use latest views for current state: `vlake.cve`, `vlake.ghsa`,
-  `vlake.exploitdb`, `vlake.nuclei`, `vlake.cwe`, and `vlake.kev`.
+  `vlake.exploitdb`, `vlake.nuclei`, `vlake.cwe`, `vlake.attack`,
+  `vlake.attack_relationship`, `vlake.capec`, and `vlake.kev`.
 - Use history tables only when the user asks for previous versions, changes over
   time, or audit/history analysis: `vlake.cve_history`, `vlake.ghsa_history`,
-  `vlake.exploitdb_history`, `vlake.nuclei_history`, `vlake.cwe_history`, and
-  `vlake.kev_history`.
+  `vlake.exploitdb_history`, `vlake.nuclei_history`, `vlake.cwe_history`,
+  `vlake.attack_history`, `vlake.attack_relationship_history`,
+  `vlake.capec_history`, and `vlake.kev_history`.
 - `vlake.epss` is daily history. There is no separate latest EPSS view.
 - For tombstone views, add `AND NOT removed` unless the user explicitly wants
   withdrawn or deleted upstream records: `vlake.nuclei` and `vlake.kev`.
 - Use `list_contains(array_column, 'CVE-...')` for array columns such as
   `nuclei.cve`, `exploitdb.cve`, and `cwe` arrays.
 - Use `UNNEST(affected)` to expand GHSA affected package/version ranges.
+- Use `vlake.cwe_attack_patterns` to map CWE IDs to CAPEC and ATT&CK techniques.
 - `nuclei.epss_score` and `nuclei.epss_percentile` are template-authored
   snapshots. Use `vlake.epss` for current or historical EPSS scores.
 - Use `SELECT * FROM vlake.datasets` for source, license, attribution, and
@@ -52,6 +55,10 @@ DESCRIBE vlake.<table>;
 | nuclei template metadata changes/deletions | `vlake.nuclei_history` |
 | Current CWE catalog entries | `vlake.cwe` |
 | CWE catalog snapshots over time | `vlake.cwe_history` |
+| Current ATT&CK Enterprise/Mobile/ICS objects | `vlake.attack` |
+| Current ATT&CK relationships | `vlake.attack_relationship` |
+| Current CAPEC attack patterns | `vlake.capec` |
+| CWE to CAPEC/ATT&CK mapping | `vlake.cwe_attack_patterns` |
 | Current CISA KEV entries | `vlake.kev WHERE NOT removed` |
 | KEV changes/withdrawals over time | `vlake.kev_history` |
 | Dataset provenance and licenses | `vlake.datasets` |
@@ -130,6 +137,24 @@ SELECT c.cve, c.title, w.cwe_id, w.name AS cwe_name
 FROM vlake.cve AS c
 LEFT JOIN vlake.cwe AS w ON list_contains(c.cwe, w.cwe_id)
 WHERE c.cve = 'CVE-2021-44228';
+```
+
+CWE to CAPEC and ATT&CK techniques:
+
+```sql
+SELECT cwe, capec_id, capec_name, attack_id, attack_name
+FROM vlake.cwe_attack_patterns
+WHERE cwe = 'CWE-89';
+```
+
+ATT&CK groups or software using a technique:
+
+```sql
+SELECT source_name, source_type, relationship_type, target_attack_id, target_name
+FROM vlake.attack_relationship
+WHERE matrix = 'enterprise'
+  AND relationship_type = 'uses'
+  AND target_attack_id = 'T1190';
 ```
 
 Current CISA KEV entry:
