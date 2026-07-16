@@ -98,6 +98,8 @@ def test_update_cloudflare_waf_initial_full_load(cfg, monkeypatch):
         "cwe",
         "kev",
         "cloudflare_waf",
+        "attack",
+        "capec",
     }
     con.close()
 

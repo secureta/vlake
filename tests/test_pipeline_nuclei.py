@@ -88,6 +88,8 @@ def test_update_nuclei_initial_full_load(cfg, tmp_path, monkeypatch):
         "cwe",
         "kev",
         "cloudflare_waf",
+        "attack",
+        "capec",
     }
 
     # 同日の再実行は skip、翌日は差分なし

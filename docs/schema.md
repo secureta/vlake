@@ -14,6 +14,10 @@ records that disappeared upstream.
 | `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
 | `cwe` | `cwe_history` | `cwe_id` | CWE catalog snapshot (join target for `cwe` columns) |
+| `attack` | `attack_history` | ATT&CK matrix × external ID | MITRE ATT&CK Enterprise / Mobile / ICS objects |
+| `attack_relationship` | `attack_relationship_history` | ATT&CK matrix × relationship ID | MITRE ATT&CK STIX relationship SROs with resolved endpoint names/IDs |
+| `capec` | `capec_history` | CAPEC ID | CAPEC attack patterns with CWE and ATT&CK mappings |
+| `cwe_attack_patterns` | *(view)* | CWE × CAPEC × ATT&CK mapping | Convenience bridge from CWE IDs to CAPEC and ATT&CK techniques |
 | `kev` | `kev_history` | CVE | CISA Known Exploited Vulnerabilities catalog |
 | `cloudflare_waf` | `cloudflare_waf_history` | vulnerability identifier × source URL | Vulnerability IDs mentioned in Cloudflare WAF ChangeLog entries |
 | `datasets` | *(view)* | dataset | Data sources, licenses & attributions |
@@ -179,6 +183,92 @@ apart by `entry_type`). The `cwe` view returns the snapshot with the latest
 | `cwe_version` | VARCHAR | CWE catalog version |
 | `release_date` | DATE | Snapshot release date (also the view's latest-row key) |
 
+### `attack` / `attack_history` — MITRE ATT&CK
+
+Append-only snapshots of the Enterprise, Mobile and ICS ATT&CK STIX bundles.
+The `attack` view returns the latest row per matrix and ATT&CK external ID (for
+example `enterprise` + `T1190`, `mobile` + `T1634`, `ics` + `T0814`).
+`object_type` distinguishes techniques, tactics, mitigations, groups, software
+and data sources.
+
+| Column | Type | Description |
+|---|---|---|
+| `matrix` | VARCHAR | ATT&CK matrix (`enterprise`, `mobile`, `ics`) |
+| `attack_id` | VARCHAR | ATT&CK external ID |
+| `object_id` | VARCHAR | STIX object ID |
+| `object_type` | VARCHAR | STIX object type (`attack-pattern`, `x-mitre-tactic`, `course-of-action`, etc.) |
+| `name` | VARCHAR | Object name |
+| `description` | VARCHAR | Description |
+| `url` | VARCHAR | MITRE ATT&CK reference URL |
+| `kill_chain_phases` | STRUCT(kill_chain_name, phase_name)[] | Tactic/phase labels present on techniques; `UNNEST` to expand |
+| `revoked` | BOOLEAN | STIX revoked flag |
+| `deprecated` | BOOLEAN | MITRE deprecated flag |
+| `modified` | TIMESTAMP | STIX modified timestamp (also the view's latest-row key) |
+| `raw` | VARCHAR | Full STIX object JSON |
+
+### `attack_relationship` / `attack_relationship_history` — MITRE ATT&CK relationships
+
+Append-only snapshots of ATT&CK STIX relationship SROs. The
+`attack_relationship` view returns the latest row per matrix and relationship
+ID. `source_*` and `target_*` columns resolve STIX refs to ATT&CK IDs, names and
+object types when the endpoint object is present in the same bundle; unresolved
+endpoints keep the raw `source_ref` / `target_ref` with NULL resolved fields.
+
+| Column | Type | Description |
+|---|---|---|
+| `matrix` | VARCHAR | ATT&CK matrix (`enterprise`, `mobile`, `ics`) |
+| `relationship_id` | VARCHAR | STIX relationship object ID |
+| `relationship_type` | VARCHAR | Relationship type (`uses`, `mitigates`, `subtechnique-of`, `detects`, etc.) |
+| `source_ref` | VARCHAR | Source STIX object ref |
+| `source_attack_id` | VARCHAR | Source ATT&CK external ID, if resolvable |
+| `source_name` | VARCHAR | Source object name, if resolvable |
+| `source_type` | VARCHAR | Source STIX object type, if resolvable |
+| `target_ref` | VARCHAR | Target STIX object ref |
+| `target_attack_id` | VARCHAR | Target ATT&CK external ID, if resolvable |
+| `target_name` | VARCHAR | Target object name, if resolvable |
+| `target_type` | VARCHAR | Target STIX object type, if resolvable |
+| `description` | VARCHAR | Relationship description |
+| `revoked` | BOOLEAN | STIX revoked flag |
+| `deprecated` | BOOLEAN | MITRE deprecated flag |
+| `modified` | TIMESTAMP | STIX modified timestamp (also the view's latest-row key) |
+| `raw` | VARCHAR | Full STIX relationship JSON |
+
+### `capec` / `capec_history` — CAPEC attack patterns
+
+Append-only snapshots of the CAPEC STIX bundle. The `capec` view returns the
+latest row per CAPEC ID. `cwe` and `attack` are external-reference arrays for
+joining CAPEC to CWE and ATT&CK.
+
+| Column | Type | Description |
+|---|---|---|
+| `capec_id` | VARCHAR | CAPEC ID |
+| `object_id` | VARCHAR | STIX object ID |
+| `name` | VARCHAR | Attack pattern name |
+| `description` | VARCHAR | Description |
+| `url` | VARCHAR | CAPEC reference URL |
+| `cwe` | VARCHAR[] | Related CWE IDs |
+| `attack` | VARCHAR[] | Related ATT&CK technique IDs |
+| `revoked` | BOOLEAN | STIX revoked flag |
+| `deprecated` | BOOLEAN | MITRE deprecated flag |
+| `modified` | TIMESTAMP | STIX modified timestamp (also the view's latest-row key) |
+| `raw` | VARCHAR | Full STIX object JSON |
+
+### `cwe_attack_patterns` — CWE to CAPEC / ATT&CK bridge
+
+Convenience view derived from `capec` and `attack`. It expands CAPEC `cwe` and
+`attack` arrays so CVE rows can be joined through their CWE IDs. CAPEC rows with
+`revoked` or `deprecated` are excluded.
+
+| Column | Type | Description |
+|---|---|---|
+| `cwe` | VARCHAR | CWE ID |
+| `capec_id` | VARCHAR | CAPEC ID |
+| `capec_name` | VARCHAR | CAPEC attack pattern name |
+| `attack_id` | VARCHAR | ATT&CK technique ID; may be NULL if CAPEC has no ATT&CK mapping |
+| `attack_name` | VARCHAR | ATT&CK technique name |
+| `attack_object_type` | VARCHAR | ATT&CK STIX object type |
+| `kill_chain_phases` | STRUCT(kill_chain_name, phase_name)[] | ATT&CK kill-chain/tactic phases |
+
 ### `kev` / `kev_history` — CISA Known Exploited Vulnerabilities
 
 Append-only history of the CISA KEV catalog. KEV records carry no modification
@@ -249,5 +339,8 @@ you want to read the Parquet files directly or operate your own mirror.
 | `exploitdb` | `exploitdb/year=YYYY/exploitdb-YYYY.parquet` | `exploitdb/updates/year=YYYY/exploitdb-updates-YYYY-MM-DD.parquet` | Snapshot partitioned by `date_published` year, sorted by `edb_id`; deltas dated by run date |
 | `nuclei` | *(none)* | `nuclei/updates/year=YYYY/nuclei-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
 | `cwe` | *(none)* | `cwe/version=<ver>/cwe-<ver>.parquet` | One full snapshot per CWE release (a few per year); `cwe/last-modified.txt` stores the upstream `Last-Modified` for conditional GETs |
+| `attack` | *(none)* | `attack/updates/year=YYYY/attack-YYYY-MM-DD.parquet` | One combined Enterprise / Mobile / ICS ATT&CK object snapshot per update run; no separate backfill |
+| `attack_relationship` | *(none)* | `attack/relationships/year=YYYY/attack-relationships-YYYY-MM-DD.parquet` | One combined Enterprise / Mobile / ICS ATT&CK relationship snapshot per update run; omitted when a test snapshot has no relationships |
+| `capec` | *(none)* | `capec/updates/year=YYYY/capec-YYYY-MM-DD.parquet` | One full CAPEC snapshot per update run; no separate backfill |
 | `kev` | *(none)* | `kev/updates/year=YYYY/kev-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full load |
 | `cloudflare_waf` | *(none)* | `cloudflare_waf/updates/year=YYYY/cloudflare-waf-updates-YYYY-MM-DD.parquet` | No backfill — the first run is the full current ChangeLog identifier snapshot |

@@ -176,6 +176,57 @@ class Lake:
                 release_date DATE
             )"""
         )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.attack_history (
+                matrix VARCHAR,
+                attack_id VARCHAR,
+                object_id VARCHAR,
+                object_type VARCHAR,
+                name VARCHAR,
+                description VARCHAR,
+                url VARCHAR,
+                kill_chain_phases STRUCT(kill_chain_name VARCHAR, phase_name VARCHAR)[],
+                revoked BOOLEAN,
+                deprecated BOOLEAN,
+                modified TIMESTAMP,
+                raw VARCHAR
+            )"""
+        )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.attack_relationship_history (
+                matrix VARCHAR,
+                relationship_id VARCHAR,
+                relationship_type VARCHAR,
+                source_ref VARCHAR,
+                source_attack_id VARCHAR,
+                source_name VARCHAR,
+                source_type VARCHAR,
+                target_ref VARCHAR,
+                target_attack_id VARCHAR,
+                target_name VARCHAR,
+                target_type VARCHAR,
+                description VARCHAR,
+                revoked BOOLEAN,
+                deprecated BOOLEAN,
+                modified TIMESTAMP,
+                raw VARCHAR
+            )"""
+        )
+        self.con.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.ALIAS}.capec_history (
+                capec_id VARCHAR,
+                object_id VARCHAR,
+                name VARCHAR,
+                description VARCHAR,
+                url VARCHAR,
+                cwe VARCHAR[],
+                attack VARCHAR[],
+                revoked BOOLEAN,
+                deprecated BOOLEAN,
+                modified TIMESTAMP,
+                raw VARCHAR
+            )"""
+        )
 
     def registered_paths(self, table: str | None = None) -> set[str]:
         if table is None:
@@ -418,6 +469,56 @@ class Lake:
             f"CREATE OR REPLACE VIEW {self.ALIAS}.cwe AS "  # noqa: S608
             f"SELECT * FROM {self.ALIAS}.cwe_history WHERE release_date = "
             f"(SELECT max(release_date) FROM {self.ALIAS}.cwe_history)"
+        )
+
+    def refresh_attack_view(self) -> None:
+        """matrix, attack_id ごとに modified 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.attack AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.attack_history "
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY matrix, attack_id ORDER BY modified DESC) = 1"
+        )
+
+    def refresh_attack_relationship_view(self) -> None:
+        """matrix, relationship_id ごとに modified 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.attack_relationship AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.attack_relationship_history "
+            f"QUALIFY row_number() OVER "
+            f"(PARTITION BY matrix, relationship_id ORDER BY modified DESC) = 1"
+        )
+
+    def refresh_capec_view(self) -> None:
+        """capec_id ごとに modified 最新の1行を返す view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"CREATE OR REPLACE VIEW {self.ALIAS}.capec AS "  # noqa: S608
+            f"SELECT * FROM {self.ALIAS}.capec_history "
+            f"QUALIFY row_number() OVER (PARTITION BY capec_id ORDER BY modified DESC) = 1"
+        )
+
+    def refresh_cwe_attack_patterns_view(self) -> None:
+        """CWE から CAPEC と ATT&CK technique をたどる連携 view。"""
+        self.con.execute(
+            # ALIAS はクラス定数の固定識別子で外部入力は入らない
+            f"""CREATE OR REPLACE VIEW {self.ALIAS}.cwe_attack_patterns AS
+            SELECT
+                cwe.cwe,
+                capec.capec_id,
+                capec.name AS capec_name,
+                attack.attack_id,
+                attack.name AS attack_name,
+                attack.object_type AS attack_object_type,
+                attack.kill_chain_phases
+            FROM {self.ALIAS}.capec, UNNEST(cwe) AS cwe(cwe)
+            LEFT JOIN UNNEST(attack) AS capec_attack(attack_id) ON true
+            LEFT JOIN {self.ALIAS}.attack AS attack
+                ON attack.matrix = 'enterprise'
+               AND attack.attack_id = capec_attack.attack_id
+            WHERE NOT capec.revoked AND NOT capec.deprecated"""  # noqa: S608
         )
 
     def add_file(self, table: str, path: str) -> bool:

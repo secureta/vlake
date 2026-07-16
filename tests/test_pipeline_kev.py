@@ -82,6 +82,8 @@ def test_update_kev_initial_full_load(cfg, monkeypatch):
         "cwe",
         "kev",
         "cloudflare_waf",
+        "attack",
+        "capec",
     }
 
     # 同日の再実行は skip、翌日は差分なし

@@ -84,6 +84,8 @@ def test_backfill_ghsa_from_local_tarball(cfg, tmp_path):
         "cwe",
         "kev",
         "cloudflare_waf",
+        "attack",
+        "capec",
     }
 
     # 冪等: 再実行は全年 skip

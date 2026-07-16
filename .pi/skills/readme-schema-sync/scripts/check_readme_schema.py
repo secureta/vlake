@@ -20,6 +20,9 @@ HISTORY_TO_SECTION = {
     "exploitdb_history": "exploitdb",
     "nuclei_history": "nuclei",
     "cwe_history": "cwe",
+    "attack_history": "attack",
+    "attack_relationship_history": "attack_relationship",
+    "capec_history": "capec",
     "kev_history": "kev",
     "cloudflare_waf_history": "cloudflare_waf",
 }
@@ -45,6 +48,15 @@ CVE_SOURCES_COLUMNS = [
     ("exploitdb_count", "BIGINT"),
     ("nuclei_count", "BIGINT"),
     ("cloudflare_waf_count", "BIGINT"),
+]
+CWE_ATTACK_PATTERNS_COLUMNS = [
+    ("cwe", "VARCHAR"),
+    ("capec_id", "VARCHAR"),
+    ("capec_name", "VARCHAR"),
+    ("attack_id", "VARCHAR"),
+    ("attack_name", "VARCHAR"),
+    ("attack_object_type", "VARCHAR"),
+    ("kill_chain_phases", "STRUCT(kill_chain_name, phase_name)[]"),
 ]
 
 
@@ -171,6 +183,7 @@ def main() -> int:
     }
     expected["datasets"] = DATASETS_COLUMNS
     expected["cve_sources"] = CVE_SOURCES_COLUMNS
+    expected["cwe_attack_patterns"] = CWE_ATTACK_PATTERNS_COLUMNS
     actual = parse_schema_doc_tables()
 
     ok = True

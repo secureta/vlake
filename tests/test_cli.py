@@ -325,6 +325,52 @@ def test_update_kev_rejects_date_option(monkeypatch, tmp_path):
     assert "--date" in result.output
 
 
+def test_update_attack_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_attack",
+        lambda cfg: "published 2026-07-12 (900 objects, 1200 relationships)",
+    )
+    result = CliRunner().invoke(main, ["update", "attack"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-12" in result.output
+
+
+def test_update_capec_via_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    from vlake import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "update_capec",
+        lambda cfg: "published 2026-07-12 (615 records)",
+    )
+    result = CliRunner().invoke(main, ["update", "capec"])
+    assert result.exit_code == 0, result.output
+    assert "published 2026-07-12" in result.output
+
+
+def test_update_attack_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "attack", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
+def test_update_capec_rejects_date_option(monkeypatch, tmp_path):
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["update", "capec", "--date", "2026-07-01"])
+    assert result.exit_code != 0
+    assert "--date" in result.output
+
+
 def test_backfill_kev_not_available(monkeypatch, tmp_path):
     # kev に backfill は無い (初回 update が全量投入)
     monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
@@ -374,3 +420,21 @@ def test_backfill_cloudflare_waf_is_not_supported(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["backfill", "cloudflare_waf"])
     assert result.exit_code != 0
     assert "Invalid value" in result.output
+
+
+def test_backfill_attack_not_available(monkeypatch, tmp_path):
+    # attack に backfill は無い (初回 update が全量投入)
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "attack"])
+    assert result.exit_code != 0
+    assert "attack" in result.output  # Choice 外の invalid choice エラー
+
+
+def test_backfill_capec_not_available(monkeypatch, tmp_path):
+    # capec に backfill は無い (初回 update が全量投入)
+    monkeypatch.setenv("VLAKE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.delenv("VLAKE_S3_BUCKET", raising=False)
+    result = CliRunner().invoke(main, ["backfill", "capec"])
+    assert result.exit_code != 0
+    assert "capec" in result.output  # Choice 外の invalid choice エラー

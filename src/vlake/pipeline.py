@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import cloudflare_waf, cvelist, cwe, epss, exploitdb, ghsa, kev, nuclei
+from . import cloudflare_waf, cvelist, cwe, epss, exploitdb, ghsa, kev, mitre, nuclei
 from .config import Config
 from .lake import Lake
 from .storage import Storage, make_storage
@@ -75,6 +75,8 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
             cwe.LICENSE_INFO,
             kev.LICENSE_INFO,
             cloudflare_waf.LICENSE_INFO,
+            mitre.ATTACK_LICENSE_INFO,
+            mitre.CAPEC_LICENSE_INFO,
         ]
     )
     lake.refresh_cve_view()
@@ -84,7 +86,11 @@ def _publish_catalog(storage: Storage, lake: Lake, catalog: Path) -> None:
     lake.refresh_cwe_view()
     lake.refresh_kev_view()
     lake.refresh_cloudflare_waf_view()
+    lake.refresh_attack_view()
+    lake.refresh_attack_relationship_view()
+    lake.refresh_capec_view()
     lake.refresh_cve_sources_view()
+    lake.refresh_cwe_attack_patterns_view()
     lake.close()
     storage.put(catalog, CATALOG_KEY)
 
@@ -709,6 +715,79 @@ def update_cloudflare_waf(cfg: Config, today: date | None = None) -> str:
     return f"published {run_date} ({len(rows)} records)"
 
 
+def update_attack(cfg: Config, today: date | None = None) -> str:
+    """ATT&CK STIX 断面を全 matrix まとめて実行日キーに追記する。"""
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = mitre.attack_key_for_update(run_date)
+    relationship_key = mitre.attack_relationship_key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            bundles = [
+                ("enterprise", mitre.fetch_attack_enterprise()),
+                ("mobile", mitre.fetch_attack_mobile()),
+                ("ics", mitre.fetch_attack_ics()),
+            ]
+            rows = [
+                row
+                for matrix, raw in bundles
+                for row in mitre.parse_attack_bundle(raw, matrix=matrix)
+            ]
+            relationships = [
+                row
+                for matrix, raw in bundles
+                for row in mitre.parse_attack_relationships(raw, matrix=matrix)
+            ]
+            parquet = workdir / "attack.parquet"
+            mitre.write_parquet(mitre.attack_rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"attack {run_date} ({len(rows)} objects)")
+            lake.add_file("attack_history", storage.url(key))
+            if relationships:
+                rel_parquet = workdir / "attack-relationships.parquet"
+                mitre.write_parquet(
+                    mitre.attack_relationship_rows_to_table(relationships), rel_parquet
+                )
+                storage.put(rel_parquet, relationship_key)
+                lake.set_message(
+                    f"attack relationships {run_date} ({len(relationships)} records)"
+                )
+                lake.add_file(
+                    "attack_relationship_history", storage.url(relationship_key)
+                )
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} objects, {len(relationships)} relationships)"
+
+
+def update_capec(cfg: Config, today: date | None = None) -> str:
+    """CAPEC STIX 断面を実行日キーの全件スナップショットとして追記する。"""
+    storage = make_storage(cfg)
+    run_date = today or datetime.now(UTC).date()
+    key = mitre.capec_key_for_update(run_date)
+    with tempfile.TemporaryDirectory() as td:
+        workdir = Path(td)
+        lake, catalog = _open_lake(storage, workdir)
+        try:
+            if storage.url(key) in lake.registered_paths():
+                return f"already-registered {run_date}"
+            rows = mitre.parse_capec_bundle(mitre.fetch_capec())
+            parquet = workdir / "capec.parquet"
+            mitre.write_parquet(mitre.capec_rows_to_table(rows), parquet)
+            storage.put(parquet, key)
+            lake.set_message(f"capec {run_date} ({len(rows)} records)")
+            lake.add_file("capec_history", storage.url(key))
+            _publish_catalog(storage, lake, catalog)
+        finally:
+            lake.close()
+    return f"published {run_date} ({len(rows)} records)"
+
+
 def update_cwe(cfg: Config) -> str:
     """cwec XML の新バージョン断面を全件スナップショットとして追記する。
 
@@ -765,6 +844,9 @@ def rebuild_catalog(cfg: Config) -> str:
         "cwe/": "cwe_history",
         "kev/": "kev_history",
         "cloudflare_waf/": "cloudflare_waf_history",
+        "attack/relationships/": "attack_relationship_history",
+        "attack/updates/": "attack_history",
+        "capec/": "capec_history",
     }
     keys = [k for k in storage.list("") if k.endswith(".parquet")]
     routed = [
@@ -807,6 +889,14 @@ _KEV_UPDATE_KEY_DATE = re.compile(r"kev-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
 _CLOUDFLARE_WAF_UPDATE_KEY_DATE = re.compile(
     r"cloudflare-waf-updates-(\d{4}-\d{2}-\d{2})\.parquet$"
 )
+_ATTACK_UPDATE_KEY_DATE = re.compile(r"attack-(\d{4}-\d{2}-\d{2})\.parquet$")
+_ATTACK_RELATIONSHIP_UPDATE_KEY_DATE = re.compile(
+    r"attack-relationships-(\d{4}-\d{2}-\d{2})\.parquet$"
+)
+_CAPEC_UPDATE_KEY_DATE = re.compile(r"capec-(\d{4}-\d{2}-\d{2})\.parquet$")
+# スナップショット型データセットではキー日付が取得日で、行の modified/release_date
+# とは追随関係にないため、_verify_history の日付追随検査を明示的に無効化する。
+_SNAPSHOT_KEY_DATE = re.compile(r"$^")
 # cwe のキーはバージョン断面 (cwe/version=<ver>/) で日付を含まないため常に不一致。
 # _verify_history の「max(ts) が日次キーに追随」検査は自然にスキップされる
 _CWE_UPDATE_KEY_DATE = re.compile(r"cwe-updates-(\d{4}-\d{2}-\d{2})\.parquet$")
@@ -1012,6 +1102,33 @@ def verify(cfg: Config, max_age_days: int | None = None) -> dict:
                     table="cloudflare_waf_history",
                     ts_column="fetched_date",
                     update_key_re=_CLOUDFLARE_WAF_UPDATE_KEY_DATE,
+                ),
+                "attack": _verify_history(
+                    storage,
+                    lake,
+                    None,  # ATT&CK は四半期程度の更新なので鮮度チェック対象外
+                    prefix="attack/updates/",
+                    table="attack_history",
+                    ts_column="modified",
+                    update_key_re=_SNAPSHOT_KEY_DATE,
+                ),
+                "attack_relationship": _verify_history(
+                    storage,
+                    lake,
+                    None,  # ATT&CK は四半期程度の更新なので鮮度チェック対象外
+                    prefix="attack/relationships/",
+                    table="attack_relationship_history",
+                    ts_column="modified",
+                    update_key_re=_SNAPSHOT_KEY_DATE,
+                ),
+                "capec": _verify_history(
+                    storage,
+                    lake,
+                    None,  # CAPEC は不定期更新なので鮮度チェック対象外
+                    prefix="capec/",
+                    table="capec_history",
+                    ts_column="modified",
+                    update_key_re=_SNAPSHOT_KEY_DATE,
                 ),
             }
         finally:

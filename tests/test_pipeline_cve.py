@@ -65,6 +65,8 @@ def test_backfill_cve_from_local_zip(cfg, tmp_path):
         "cwe",
         "kev",
         "cloudflare_waf",
+        "attack",
+        "capec",
     }
 
     # 冪等: 再実行は全年 skip

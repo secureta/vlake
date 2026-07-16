@@ -66,12 +66,14 @@ The result looks like this:
 | ExploitDB | Exploit Database index metadata | `vlake.exploitdb` |
 | nuclei-templates | Detection template metadata | `vlake.nuclei WHERE NOT removed` |
 | CWE | Common Weakness Enumeration catalog | `vlake.cwe` |
+| MITRE ATT&CK | Enterprise, Mobile and ICS adversary tactics, techniques, mitigations, related objects and relationships | `vlake.attack` / `vlake.attack_relationship` |
+| CAPEC | Common attack patterns mapped to CWE and ATT&CK | `vlake.capec` |
 | CISA KEV | Known Exploited Vulnerabilities catalog | `vlake.kev WHERE NOT removed` |
 | Cloudflare WAF ChangeLog | Vulnerability IDs mentioned in Cloudflare WAF managed-rules updates | `vlake.cloudflare_waf WHERE NOT removed` |
 
 Most datasets are modeled as:
 
-- a latest view (`cve`, `ghsa`, `exploitdb`, `nuclei`, `cwe`, `kev`, `cloudflare_waf`) for normal queries
+- a latest view (`cve`, `ghsa`, `exploitdb`, `nuclei`, `cwe`, `attack`, `attack_relationship`, `capec`, `kev`, `cloudflare_waf`) for normal queries
 - a history table (`*_history`) when you need previous versions or change history
 
 EPSS is already daily history, so it has no separate latest view.
@@ -128,6 +130,32 @@ SELECT template_id, name, severity, template_url
 FROM vlake.nuclei
 WHERE list_contains(cve, 'CVE-2024-3400')
   AND NOT removed;
+```
+
+### Map CVEs to attack patterns and ATT&CK techniques
+
+```sql
+SELECT
+  c.cve,
+  c.title,
+  p.cwe,
+  p.capec_id,
+  p.capec_name,
+  p.attack_id,
+  p.attack_name
+FROM vlake.cve AS c
+JOIN vlake.cwe_attack_patterns AS p ON list_contains(c.cwe, p.cwe)
+WHERE c.cve = 'CVE-2021-44228';
+```
+
+### Find ATT&CK relationships
+
+```sql
+SELECT source_name, relationship_type, target_attack_id, target_name
+FROM vlake.attack_relationship
+WHERE matrix = 'enterprise'
+  AND relationship_type = 'uses'
+  AND target_attack_id = 'T1190';
 ```
 
 ### Check if a CVE is known-exploited in the wild
@@ -197,6 +225,10 @@ records that disappeared upstream.
 | `exploitdb` | `exploitdb_history` | `edb_id` | Exploit Database index (metadata; code linked by URL) |
 | `nuclei` | `nuclei_history` | `template_id` | nuclei-templates detection metadata (linked by URL) |
 | `cwe` | `cwe_history` | `cwe_id` | CWE catalog snapshot (join target for `cwe` columns) |
+| `attack` | `attack_history` | ATT&CK matrix × external ID | MITRE ATT&CK Enterprise / Mobile / ICS objects |
+| `attack_relationship` | `attack_relationship_history` | ATT&CK matrix × relationship ID | MITRE ATT&CK STIX relationship SROs with resolved endpoint names/IDs |
+| `capec` | `capec_history` | CAPEC ID | CAPEC attack patterns with CWE and ATT&CK mappings |
+| `cwe_attack_patterns` | *(view)* | CWE × CAPEC × ATT&CK mapping | Convenience bridge from CWE IDs to CAPEC and ATT&CK techniques |
 | `kev` | `kev_history` | CVE | CISA Known Exploited Vulnerabilities catalog |
 | `cloudflare_waf` | `cloudflare_waf_history` | vulnerability identifier × source URL | Vulnerability IDs mentioned in Cloudflare WAF ChangeLog entries |
 | `datasets` | *(view)* | dataset | Data sources, licenses & attributions |
@@ -257,6 +289,8 @@ uv run vlake update nuclei  # first run is a full load
 uv run vlake update cwe     # snapshot per CWE release
 uv run vlake update kev     # first run is a full load
 uv run vlake update cloudflare_waf  # first run is a full load
+uv run vlake update attack  # Enterprise / Mobile / ICS ATT&CK snapshot + relationships
+uv run vlake update capec   # CAPEC snapshot with CWE/ATT&CK mappings
 uv run vlake verify
 ```
 
@@ -308,6 +342,8 @@ disclaimers.
 | ExploitDB | [Exploit Database index](https://gitlab.com/exploit-database/exploitdb) | GPL-2.0-or-later for the derived ExploitDB Parquet metadata only; exploit code is not redistributed and is linked by `code_url` |
 | nuclei | [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates) | MIT; template metadata only, template bodies are not redistributed and are linked by `template_url` |
 | CWE | [Common Weakness Enumeration](https://cwe.mitre.org/) | CWE Terms of Use; redistributed with modifications; not endorsed or certified by The MITRE Corporation |
+| ATT&CK | [MITRE ATT&CK](https://github.com/mitre-attack/attack-stix-data) | MITRE ATT&CK Terms of Use; Enterprise / Mobile / ICS STIX bundles redistributed with modifications; not endorsed or certified by The MITRE Corporation |
+| CAPEC | [Common Attack Pattern Enumeration and Classification](https://github.com/mitre/cti/tree/master/capec/2.1) | MITRE CAPEC Terms of Use; redistributed with modifications; not endorsed or certified by The MITRE Corporation |
 | KEV | [CISA Known Exploited Vulnerabilities Catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) | CC0 1.0 Universal; redistributed with modifications; not endorsed by CISA or DHS |
 | cloudflare_waf | [Cloudflare WAF ChangeLog](https://developers.cloudflare.com/waf/change-log/) | CC-BY 4.0; vulnerability identifiers extracted from Cloudflare Docs MDX and converted to Parquet |
 
